@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 from tweb.parser.elements import (
+    Blockquote,
     CodeBlock,
     Document,
     Form,
@@ -112,9 +113,11 @@ class HTMLParser:
             return blocks
 
         if tag == "blockquote":
-            text = element.get_text(strip=True)
-            if text:
-                blocks.append(Paragraph(text=f"> {text}"))
+            inner_blocks = []
+            for child in element.children:
+                inner_blocks.extend(self._parse_element(child, base_url))
+            if inner_blocks:
+                blocks.append(Blockquote(blocks=inner_blocks))
             return blocks
 
         if tag == "hr":

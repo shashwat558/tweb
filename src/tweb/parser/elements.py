@@ -97,6 +97,11 @@ class Form:
     submit_text: str = "Submit"
 
 
+@dataclass
+class Blockquote:
+    blocks: list = field(default_factory=list)
+
+
 Block = (
     Heading
     | Paragraph
@@ -108,6 +113,7 @@ Block = (
     | HorizontalRule
     | Table
     | Form
+    | Blockquote
 )
 
 
