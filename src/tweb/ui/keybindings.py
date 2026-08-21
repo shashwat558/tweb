@@ -19,4 +19,6 @@ BINDINGS = [
     Binding("pagedown", "page_down", "Page Down", show=False),
     Binding("home", "scroll_home", "Home", show=False),
     Binding("end", "scroll_end", "End", show=False),
+    Binding("tab", "focus_next_form_field", "Next Field", show=False),
+    Binding("shift+tab", "focus_prev_form_field", "Prev Field", show=False),
 ]

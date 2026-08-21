@@ -50,6 +50,28 @@ class NetworkClient:
         except httpx.HTTPError as e:
             raise NetworkError(f"HTTP error: {e}")
 
+    async def submit(self, url: str, method: str, data: dict[str, str]) -> httpx.Response:
+        try:
+            client = await self._get_client()
+            if method.upper() == "GET":
+                response = await client.get(url, params=data)
+            else:
+                response = await client.post(url, data=data)
+            self._check_status(response)
+            return response
+        except httpx.TimeoutException:
+            raise NetworkError(f"Connection timed out: {url}")
+        except httpx.ConnectError as e:
+            raise NetworkError(f"Could not connect to {url}: {e}")
+        except httpx.DNSLookupError:
+            raise NetworkError(f"DNS lookup failed for {url}")
+        except httpx.TooManyRedirects:
+            raise NetworkError(f"Too many redirects for {url}")
+        except httpx.InvalidURL:
+            raise NetworkError(f"Invalid URL: {url}")
+        except httpx.HTTPError as e:
+            raise NetworkError(f"HTTP error: {e}")
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

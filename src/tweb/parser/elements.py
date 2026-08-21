@@ -96,6 +96,9 @@ class FormField:
     value: str = ""
     label: str = ""
     placeholder: str = ""
+    options: list[str] = field(default_factory=list)
+    checked: bool = False
+    form_id: int = 0
 
 
 @dataclass
@@ -104,6 +107,8 @@ class Form:
     method: str = "GET"
     fields: list[FormField] = field(default_factory=list)
     submit_text: str = "Submit"
+    form_id: int = 0
+    hidden_fields: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

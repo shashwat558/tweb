@@ -36,10 +36,12 @@ class HTMLParser:
     def __init__(self) -> None:
         self._link_counter = 0
         self._links: list[Link] = []
+        self._form_counter = 0
 
     def parse(self, html: str, base_url: str) -> Document:
         self._link_counter = 0
         self._links = []
+        self._form_counter = 0
         soup = BeautifulSoup(html, "lxml")
         title = self._extract_title(soup)
         body = soup.find("body") or soup
@@ -278,7 +280,10 @@ class HTMLParser:
         if action:
             action = urljoin(base_url, action)
 
+        self._form_counter += 1
+        form_id = self._form_counter
         fields: list[FormField] = []
+        hidden_fields: dict[str, str] = {}
         submit_text = "Submit"
 
         for input_tag in element.find_all("input"):
@@ -286,15 +291,53 @@ class HTMLParser:
             input_type = input_tag.get("type", "text").lower()
             value = input_tag.get("value", "")
             placeholder = input_tag.get("placeholder", "")
-            if input_type in ("text", "search", "email", "password", "url", "number"):
+
+            if input_type == "hidden":
+                if name:
+                    hidden_fields[name] = value
+            elif input_type in ("text", "search", "email", "password", "url", "number"):
                 fields.append(FormField(
                     name=name,
                     field_type=input_type,
                     value=value,
                     placeholder=placeholder,
+                    form_id=form_id,
                 ))
             elif input_type == "submit":
                 submit_text = value or "Submit"
+            elif input_type == "checkbox":
+                checked = input_tag.get("checked") is not None
+                fields.append(FormField(
+                    name=name,
+                    field_type="checkbox",
+                    value=value or "on",
+                    checked=checked,
+                    form_id=form_id,
+                ))
+            elif input_type == "radio":
+                checked = input_tag.get("checked") is not None
+                fields.append(FormField(
+                    name=name,
+                    field_type="radio",
+                    value=value,
+                    checked=checked,
+                    form_id=form_id,
+                ))
+
+        for select_tag in element.find_all("select"):
+            name = select_tag.get("name", "")
+            options: list[str] = []
+            for option in select_tag.find_all("option"):
+                opt_value = option.get("value", option.get_text(strip=True))
+                if opt_value:
+                    options.append(opt_value)
+            if name:
+                fields.append(FormField(
+                    name=name,
+                    field_type="select",
+                    options=options,
+                    form_id=form_id,
+                ))
 
         for textarea in element.find_all("textarea"):
             name = textarea.get("name", "")
@@ -303,6 +346,7 @@ class HTMLParser:
                 name=name,
                 field_type="textarea",
                 placeholder=placeholder,
+                form_id=form_id,
             ))
 
         for button in element.find_all("button"):
@@ -315,4 +359,6 @@ class HTMLParser:
             method=method,
             fields=fields,
             submit_text=submit_text,
-        ) if fields else None
+            form_id=form_id,
+            hidden_fields=hidden_fields,
+        )

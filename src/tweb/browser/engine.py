@@ -18,6 +18,12 @@ class BrowserEngine:
         document = self._parser.parse(html, str(response.url))
         return document
 
+    async def submit_form(self, url: str, method: str, data: dict[str, str]) -> Document:
+        response = await self._client.submit(url, method, data)
+        html = response.text
+        document = self._parser.parse(html, str(response.url))
+        return document
+
     async def run(self, url: str) -> None:
         try:
             document = await self.navigate(url)

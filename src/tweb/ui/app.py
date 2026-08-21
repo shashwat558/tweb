@@ -8,11 +8,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.message import Message
-from textual.widgets import Footer, Header, Input, LoadingIndicator, Static
+from textual.widgets import Button, Checkbox, Footer, Header, Input, LoadingIndicator, Select, Static, TextArea
 
 from tweb.browser.engine import BrowserEngine
 from tweb.browser.history import BrowserHistory
-from tweb.parser.css import css_style_to_rich, merge_styles
+from tweb.parser.css import merge_styles
 from tweb.parser.elements import (
     Blockquote,
     CodeBlock,
@@ -27,7 +27,7 @@ from tweb.parser.elements import (
     Table,
 )
 from tweb.ui.keybindings import BINDINGS
-from tweb.ui.widgets import ContentView, StatusBar
+from tweb.ui.widgets import ContentView, FormContainer, FormSubmitButton, StatusBar
 
 
 class TWebInput(Input):
@@ -79,6 +79,52 @@ class TWebApp(App):
         background: $surface;
     }
 
+    #content-inner {
+        height: auto;
+    }
+
+    .content-static {
+        height: auto;
+    }
+
+    .form-container {
+        height: auto;
+        padding: 1 2;
+        margin: 1 0;
+        border: solid $primary;
+    }
+
+    .form-label {
+        height: auto;
+        color: $text;
+        text-style: bold;
+    }
+
+    .form-input {
+        width: 100%;
+        height: 3;
+    }
+
+    .form-textarea {
+        width: 100%;
+        height: 6;
+    }
+
+    .form-select {
+        width: 100%;
+        height: 3;
+    }
+
+    .form-checkbox {
+        height: 1;
+    }
+
+    .form-submit {
+        width: auto;
+        height: 3;
+        margin: 1 0;
+    }
+
     #loading {
         dock: top;
         height: 1;
@@ -112,6 +158,7 @@ class TWebApp(App):
         self._find_query = ""
         self._find_index = 0
         self._find_matches: list[int] = []
+        self._form_data: dict[int, dict[str, str]] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -132,6 +179,10 @@ class TWebApp(App):
             self._find_visible = False
             self._find_matches = []
             self._find_index = 0
+        self.query_one("#content", ContentView).focus()
+
+    @on(ContentView.FocusRequested)
+    def _handle_focus_requested(self) -> None:
         self.query_one("#content", ContentView).focus()
 
     def _get_content_width(self) -> int:
@@ -173,8 +224,9 @@ class TWebApp(App):
             document = await self._engine.navigate(url)
             self._document = document
             self._links = document.links
-            rich_text = self._format_document(document)
-            content.set_content(rich_text)
+            self._form_data = {}
+            widgets = self._build_widgets(document)
+            content.set_widgets(widgets)
             status_bar.set_status(f"{document.title} - {url}")
             if not from_history:
                 self._history.push(url)
@@ -189,30 +241,72 @@ class TWebApp(App):
         finally:
             self._hide_loading()
 
-    def _format_document(self, document: Document) -> Text:
+    def _build_widgets(self, document: Document) -> list:
         w = self._get_content_width()
-        result = Text()
+        widgets: list = []
 
-        result.append("═" * w + "\n", style="bold white")
-        result.append(f"  {document.title}\n", style="bold white on blue")
-        result.append("═" * w + "\n\n", style="bold white")
+        header_text = Text()
+        header_text.append("═" * w + "\n", style="bold white")
+        header_text.append(f"  {document.title}\n", style="bold white on blue")
+        header_text.append("═" * w + "\n\n", style="bold white")
+        widgets.append(Static(header_text, classes="content-static"))
 
         for block in document.blocks:
-            result.append_text(self._render_block(block, w))
-            result.append("\n")
+            if isinstance(block, Form):
+                form_widget = self._build_form_widget(block)
+                widgets.append(form_widget)
+            else:
+                text = self._render_block(block, w)
+                widgets.append(Static(text, classes="content-static"))
 
         if document.links:
-            result.append("─" * w + "\n", style="dim")
-            result.append("  Links:\n", style="bold cyan")
+            links_text = Text()
+            links_text.append("─" * w + "\n", style="dim")
+            links_text.append("  Links:\n", style="bold cyan")
             for i, link in enumerate(document.links):
                 marker = "▶ " if i == self._selected_link else "  "
                 marker_style = "bold yellow" if i == self._selected_link else ""
-                result.append(marker, style=marker_style)
-                result.append(f"[{link.index + 1}] ", style="bold cyan")
-                result.append(f"{link.text}\n", style="underline cyan")
-            result.append("─" * w + "\n", style="dim")
+                links_text.append(marker, style=marker_style)
+                links_text.append(f"[{link.index + 1}] ", style="bold cyan")
+                links_text.append(f"{link.text}\n", style="underline cyan")
+            links_text.append("─" * w + "\n", style="dim")
+            widgets.append(Static(links_text, classes="content-static"))
 
-        return result
+        return widgets
+
+    def _build_form_widget(self, form: Form) -> FormContainer:
+        form_container = FormContainer(form, classes="form-container")
+        self._form_data[form.form_id] = dict(form.hidden_fields)
+
+        for field in form.fields:
+            from tweb.ui.widgets import FormFieldWidget
+            form_container.mount(FormFieldWidget(field))
+
+        submit = FormSubmitButton(form.form_id, form.submit_text)
+        form_container.mount(submit)
+        return form_container
+
+    def _render_form(self, result: Text, form: Form, w: int) -> None:
+        inner_w = w - 4
+        result.append("  ┌" + "─" * inner_w + "┐\n", style="dim")
+        for field in form.fields:
+            name = field.name or field.field_type
+            if field.field_type == "textarea":
+                result.append(f"  │ {name}:\n", style="bold")
+                result.append(f"  │ {'─' * inner_w} │\n", style="dim")
+            elif field.field_type == "select":
+                placeholder = field.placeholder or name
+                result.append(f"  │ {name}: [{placeholder}]{' ' * max(0, inner_w - len(name) - len(placeholder) - 4)}│\n", style="bold")
+            elif field.field_type == "checkbox":
+                check = "✓" if field.checked else " "
+                result.append(f"  │ [{check}] {name}{' ' * max(0, inner_w - len(name) - 4)}│\n", style="bold")
+            elif field.field_type == "radio":
+                result.append(f"  │ ( ) {name} ({field.value}){' ' * max(0, inner_w - len(name) - len(field.value) - 6)}│\n", style="bold")
+            else:
+                placeholder = field.placeholder or name
+                result.append(f"  │ {name}: [{placeholder}]{' ' * max(0, inner_w - len(name) - len(placeholder) - 4)}│\n", style="bold")
+        result.append(f"  │ {form.submit_text}{' ' * max(0, inner_w - len(form.submit_text) - 2)}│\n", style="bold white on blue")
+        result.append("  └" + "─" * inner_w + "┘\n", style="dim")
 
     def _render_block(self, block, w: int) -> Text:
         result = Text()
@@ -270,9 +364,6 @@ class TWebApp(App):
 
         elif isinstance(block, HorizontalRule):
             result.append("─" * w + "\n", style="dim")
-
-        elif isinstance(block, Form):
-            self._render_form(result, block, w)
 
         elif isinstance(block, Blockquote):
             for sub_block in block.blocks:
@@ -395,20 +486,6 @@ class TWebApp(App):
         if not header_rows:
             result.append(f"{sep}\n", style="dim")
 
-    def _render_form(self, result: Text, form: Form, w: int) -> None:
-        inner_w = w - 4
-        result.append("  ┌" + "─" * inner_w + "┐\n", style="dim")
-        for field in form.fields:
-            name = field.name or field.field_type
-            if field.field_type == "textarea":
-                result.append(f"  │ {name}:\n", style="bold")
-                result.append(f"  │ {'─' * inner_w} │\n", style="dim")
-            else:
-                placeholder = field.placeholder or name
-                result.append(f"  │ {name}: [{placeholder}]{' ' * max(0, inner_w - len(name) - len(placeholder) - 4)}│\n", style="bold")
-        result.append(f"  │ {form.submit_text}{' ' * max(0, inner_w - len(form.submit_text) - 2)}│\n", style="bold white on blue")
-        result.append("  └" + "─" * inner_w + "┘\n", style="dim")
-
     def _perform_find(self, query: str) -> None:
         if not query or not self._document:
             self._find_matches = []
@@ -445,6 +522,56 @@ class TWebApp(App):
             query = event.value.strip()
             self._find_query = query
             self._perform_find(query)
+
+    @on(FormSubmitButton.Submitted)
+    async def _handle_form_submit(self, event: FormSubmitButton.Submitted) -> None:
+        form_id = event.form_id
+        if not self._document:
+            return
+
+        form = None
+        for block in self._document.blocks:
+            if isinstance(block, Form) and block.form_id == form_id:
+                form = block
+                break
+        if not form:
+            return
+
+        data = dict(form.hidden_fields)
+        content = self.query_one("#content", ContentView)
+
+        for field in form.fields:
+            if field.field_type in ("text", "search", "email", "password", "url", "number"):
+                try:
+                    input_widget = content.query_one(f"#field-{field.name}", Input)
+                    data[field.name] = input_widget.value
+                except Exception:
+                    data[field.name] = field.value
+            elif field.field_type == "checkbox":
+                try:
+                    checkbox_widget = content.query_one(f"#field-{field.name}", Checkbox)
+                    data[field.name] = field.value if checkbox_widget.value else ""
+                except Exception:
+                    data[field.name] = field.value if field.checked else ""
+            elif field.field_type == "select":
+                try:
+                    select_widget = content.query_one(f"#field-{field.name}", Select)
+                    data[field.name] = str(select_widget.value) if select_widget.value else ""
+                except Exception:
+                    pass
+            elif field.field_type == "textarea":
+                try:
+                    textarea_widget = content.query_one(f"#field-{field.name}", TextArea)
+                    data[field.name] = textarea_widget.text
+                except Exception:
+                    pass
+
+        action = form.action or self._current_url
+        self._load_page(action)
+
+    @on(ContentView.LinkClicked)
+    async def _handle_link_clicked(self, event: ContentView.LinkClicked) -> None:
+        self._load_page(event.url)
 
     async def action_focus_url(self) -> None:
         url_input = self.query_one("#url-input", TWebInput)
@@ -515,7 +642,8 @@ class TWebApp(App):
         self._selected_link = min(self._selected_link + 1, len(self._links) - 1)
         if self._document:
             content = self.query_one("#content", ContentView)
-            content.set_content(self._format_document(self._document))
+            widgets = self._build_widgets(self._document)
+            content.set_widgets(widgets)
 
     def action_select_prev_link(self) -> None:
         if not self._links:
@@ -523,7 +651,8 @@ class TWebApp(App):
         self._selected_link = max(self._selected_link - 1, 0)
         if self._document:
             content = self.query_one("#content", ContentView)
-            content.set_content(self._format_document(self._document))
+            widgets = self._build_widgets(self._document)
+            content.set_widgets(widgets)
 
     async def action_open_selected_link(self) -> None:
         if 0 <= self._selected_link < len(self._links):
@@ -539,3 +668,31 @@ class TWebApp(App):
         url = self._history.forward()
         if url:
             self._load_page(url, from_history=True)
+
+    async def action_focus_next_form_field(self) -> None:
+        content = self.query_one("#content", ContentView)
+        focusable = content.query("Input, Select, Checkbox, TextArea, Button")
+        if not focusable:
+            return
+        focused = content.query_one(":focus")
+        idx = -1
+        for i, w in enumerate(focusable):
+            if w is focused:
+                idx = i
+                break
+        next_idx = (idx + 1) % len(focusable)
+        focusable[next_idx].focus()
+
+    async def action_focus_prev_form_field(self) -> None:
+        content = self.query_one("#content", ContentView)
+        focusable = content.query("Input, Select, Checkbox, TextArea, Button")
+        if not focusable:
+            return
+        focused = content.query_one(":focus")
+        idx = len(focusable)
+        for i, w in enumerate(focusable):
+            if w is focused:
+                idx = i
+                break
+        prev_idx = (idx - 1) % len(focusable)
+        focusable[prev_idx].focus()
