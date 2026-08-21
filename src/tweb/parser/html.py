@@ -4,6 +4,13 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from tweb.parser.css import (
+    css_style_to_rich,
+    get_element_default_color,
+    get_element_default_style,
+    merge_styles,
+    parse_inline_style,
+)
 from tweb.parser.elements import (
     Blockquote,
     CodeBlock,
@@ -48,6 +55,32 @@ class HTMLParser:
             return h1.get_text(strip=True)
         return "Untitled"
 
+    def _get_element_style(self, element: Tag) -> str:
+        inline = parse_inline_style(element.get("style", ""))
+        inline_rich = css_style_to_rich(inline)
+
+        default_style = get_element_default_style(element.name)
+        default_color = get_element_default_color(element.name)
+
+        final_style = merge_styles(default_style, inline_rich)
+
+        if inline.color and not default_color:
+            pass
+        elif default_color and not inline.color:
+            if "on " not in final_style:
+                final_style = merge_styles(final_style, default_color)
+
+        return final_style
+
+    def _get_element_color(self, element: Tag) -> tuple[str | None, str | None]:
+        inline = parse_inline_style(element.get("style", ""))
+        default_color = get_element_default_color(element.name)
+
+        color = inline.color or default_color
+        bg_color = inline.bg_color
+
+        return color, bg_color
+
     def _parse_element(self, element: Tag | NavigableString, base_url: str) -> list:
         blocks: list = []
         if isinstance(element, NavigableString):
@@ -65,14 +98,16 @@ class HTMLParser:
             level = int(tag[1])
             text = element.get_text(strip=True)
             if text:
-                blocks.append(Heading(level=level, text=text))
+                rich_style = self._get_element_style(element)
+                blocks.append(Heading(level=level, text=text, rich_style=rich_style))
             return blocks
 
         if tag == "p":
             text = element.get_text(strip=True)
             if text:
                 parts = self._parse_inline(element, base_url)
-                blocks.append(Paragraph(text=text, parts=parts))
+                rich_style = self._get_element_style(element)
+                blocks.append(Paragraph(text=text, parts=parts, rich_style=rich_style))
             return blocks
 
         if tag == "a":
@@ -80,6 +115,7 @@ class HTMLParser:
             text = element.get_text(strip=True)
             if href and text:
                 url = urljoin(base_url, href)
+                rich_style = self._get_element_style(element)
                 link = Link(url=url, text=text, index=self._link_counter)
                 self._link_counter += 1
                 self._links.append(link)
@@ -109,7 +145,8 @@ class HTMLParser:
                     if cls.startswith("language-"):
                         lang = cls[9:]
                         break
-            blocks.append(CodeBlock(language=lang, code=text))
+            rich_style = self._get_element_style(element)
+            blocks.append(CodeBlock(language=lang, code=text, rich_style=rich_style))
             return blocks
 
         if tag == "blockquote":
@@ -117,7 +154,8 @@ class HTMLParser:
             for child in element.children:
                 inner_blocks.extend(self._parse_element(child, base_url))
             if inner_blocks:
-                blocks.append(Blockquote(blocks=inner_blocks))
+                rich_style = self._get_element_style(element)
+                blocks.append(Blockquote(blocks=inner_blocks, rich_style=rich_style))
             return blocks
 
         if tag == "hr":
@@ -139,6 +177,10 @@ class HTMLParser:
                 blocks.append(form)
             return blocks
 
+        if tag == "li":
+            blocks.extend(self._parse_list_item(element, base_url))
+            return blocks
+
         for child in element.children:
             blocks.extend(self._parse_element(child, base_url))
 
@@ -154,13 +196,50 @@ class HTMLParser:
             elif isinstance(child, Tag):
                 text = child.get_text()
                 if text.strip():
+                    inline_css = parse_inline_style(child.get("style", ""))
+                    color, bg_color = self._get_element_color(child)
+
+                    rich_parts: list[str] = []
+                    if child.name in ("strong", "b"):
+                        rich_parts.append("bold")
+                    if child.name in ("em", "i"):
+                        rich_parts.append("italic")
+                    if child.name == "u":
+                        rich_parts.append("underline")
+                    if child.name == "code":
+                        rich_parts.append("on grey11")
+                    if child.name in ("del", "s"):
+                        rich_parts.append("strike")
+
+                    if inline_css.font_weight in ("bold", "bolder", "600", "700", "800", "900"):
+                        rich_parts.append("bold")
+                    if inline_css.font_style == "italic":
+                        rich_parts.append("italic")
+                    if inline_css.text_decoration and "underline" in inline_css.text_decoration:
+                        rich_parts.append("underline")
+                    if inline_css.text_decoration and "line-through" in inline_css.text_decoration:
+                        rich_parts.append("strike")
+                    if inline_css.opacity is not None and inline_css.opacity < 0.5:
+                        rich_parts.append("dim")
+
+                    if color:
+                        rich_parts.append(color)
+                    if bg_color:
+                        rich_parts.append(f"on {bg_color}")
+
+                    rich_style_str = " ".join(rich_parts)
+
                     parts.append(
                         Text(
                             content=text,
-                            bold=child.name in ("strong", "b"),
-                            italic=child.name in ("em", "i"),
-                            underline=child.name == "u",
+                            bold=child.name in ("strong", "b") or inline_css.font_weight in ("bold", "bolder"),
+                            italic=child.name in ("em", "i") or inline_css.font_style == "italic",
+                            underline=child.name == "u" or (inline_css.text_decoration and "underline" in inline_css.text_decoration),
                             code=child.name == "code",
+                            color=color,
+                            bg_color=bg_color,
+                            strike=child.name in ("del", "s") or (inline_css.text_decoration and "line-through" in inline_css.text_decoration),
+                            rich_style=rich_style_str,
                         )
                     )
         return parts
@@ -175,13 +254,20 @@ class HTMLParser:
                 items.append(ListItem(blocks=blocks))
         return items
 
+    def _parse_list_item(self, element: Tag, base_url: str) -> list:
+        blocks: list = []
+        for child in element.children:
+            blocks.extend(self._parse_element(child, base_url))
+        return blocks
+
     def _parse_table(self, element: Tag, base_url: str) -> Table | None:
         rows: list[TableRow] = []
         for tr in element.find_all("tr"):
             cells: list[TableCell] = []
             for cell in tr.find_all(["td", "th"]):
                 text = cell.get_text(strip=True)
-                cells.append(TableCell(text=text, header=cell.name == "th"))
+                rich_style = self._get_element_style(cell)
+                cells.append(TableCell(text=text, header=cell.name == "th", rich_style=rich_style))
             if cells:
                 rows.append(TableRow(cells=cells))
         return Table(rows=rows) if rows else None

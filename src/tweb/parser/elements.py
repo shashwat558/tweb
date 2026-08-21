@@ -10,6 +10,10 @@ class Text:
     italic: bool = False
     underline: bool = False
     code: bool = False
+    color: str | None = None
+    bg_color: str | None = None
+    strike: bool = False
+    rich_style: str = ""
 
 
 @dataclass
@@ -40,23 +44,27 @@ class List:
 class Heading:
     level: int
     text: str
+    rich_style: str = ""
 
 
 @dataclass
 class Paragraph:
     text: str
     parts: list[Text] = field(default_factory=list)
+    rich_style: str = ""
 
 
 @dataclass
 class CodeBlock:
     language: str
     code: str
+    rich_style: str = ""
 
 
 @dataclass
 class Preformatted:
     text: str
+    rich_style: str = ""
 
 
 @dataclass
@@ -68,6 +76,7 @@ class HorizontalRule:
 class TableCell:
     text: str
     header: bool = False
+    rich_style: str = ""
 
 
 @dataclass
@@ -100,6 +109,7 @@ class Form:
 @dataclass
 class Blockquote:
     blocks: list = field(default_factory=list)
+    rich_style: str = ""
 
 
 Block = (

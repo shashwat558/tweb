@@ -12,6 +12,7 @@ from textual.widgets import Footer, Header, Input, LoadingIndicator, Static
 
 from tweb.browser.engine import BrowserEngine
 from tweb.browser.history import BrowserHistory
+from tweb.parser.css import css_style_to_rich, merge_styles
 from tweb.parser.elements import (
     Blockquote,
     CodeBlock,
@@ -219,6 +220,8 @@ class TWebApp(App):
         if isinstance(block, Heading):
             prefix = "#" * block.level
             style = {1: "bold white", 2: "bold bright_white", 3: "bold"}.get(block.level, "bold")
+            if block.rich_style:
+                style = merge_styles(style, block.rich_style)
             for line in self._wrap(block.text, w - len(prefix) - 1):
                 result.append(f"{prefix} {line}\n", style=style)
 
@@ -227,7 +230,7 @@ class TWebApp(App):
                 self._render_rich_paragraph(result, block, w)
             else:
                 for line in self._wrap(block.text, w):
-                    result.append(f"{line}\n")
+                    result.append(f"{line}\n", style=block.rich_style or None)
 
         elif isinstance(block, Link):
             result.append(f"  [{block.index + 1}] ", style="bold cyan")
@@ -276,7 +279,8 @@ class TWebApp(App):
                 inner = self._render_block(sub_block, w - 4)
                 for line in inner.plain.split("\n"):
                     if line.strip():
-                        result.append(f"  ▸ {line}\n", style="italic dim")
+                        style = merge_styles("italic dim", block.rich_style)
+                        result.append(f"  ▸ {line}\n", style=style)
                     else:
                         result.append("\n")
 
@@ -301,7 +305,7 @@ class TWebApp(App):
             line_stripped = line.strip()
             line_start = full_text.find(line_stripped)
             if line_start < 0:
-                result.append(f"{line}\n")
+                result.append(f"{line}\n", style=block.rich_style or None)
                 continue
 
             current = line_start
@@ -311,7 +315,7 @@ class TWebApp(App):
                 styled = False
                 for start_offset, (end_offset, part) in parts_by_offset.items():
                     if start_offset <= current < end_offset:
-                        style_parts = []
+                        style_parts: list[str] = []
                         if part.bold:
                             style_parts.append("bold")
                         if part.italic:
@@ -320,7 +324,17 @@ class TWebApp(App):
                             style_parts.append("underline")
                         if part.code:
                             style_parts.append("on grey11")
-                        style = " ".join(style_parts) if style_parts else ""
+                        if part.strike:
+                            style_parts.append("strike")
+                        if part.color:
+                            style_parts.append(part.color)
+                        if part.bg_color:
+                            style_parts.append(f"on {part.bg_color}")
+
+                        if part.rich_style:
+                            style_parts.append(part.rich_style)
+
+                        style = " ".join(style_parts) if style_parts else (block.rich_style or "")
 
                         seg_start = max(current, start_offset)
                         seg_end = min(line_end, end_offset)
@@ -337,7 +351,7 @@ class TWebApp(App):
                             next_styled = min(next_styled, start_offset)
                             break
                     segment = full_text[current:next_styled]
-                    result.append(segment)
+                    result.append(segment, style=block.rich_style or None)
                     current = next_styled
 
             result.append("\n")
@@ -367,6 +381,8 @@ class TWebApp(App):
                 parts.append(f" {text} ")
             line = "│".join(parts)
             style = "bold" if any(c.header for c in row.cells) else ""
+            if cell.rich_style:
+                style = merge_styles(style, cell.rich_style)
             result.append(f"{line}\n", style=style)
 
         for row in header_rows:
