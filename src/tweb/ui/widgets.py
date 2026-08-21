@@ -79,9 +79,17 @@ class FormContainer(Vertical):
     can_focus = False
     can_focus_children = True
 
-    def __init__(self, form: Form, **kwargs) -> None:
+    def __init__(self, form: Form, fields: list, submit_id: int, submit_text: str, **kwargs) -> None:
         super().__init__(**kwargs)
         self.form = form
+        self._fields = fields
+        self._submit_id = submit_id
+        self._submit_text = submit_text
+
+    def compose(self) -> ComposeResult:
+        for field in self._fields:
+            yield FormFieldWidget(field)
+        yield FormSubmitButton(self._submit_id, self._submit_text)
 
 
 class ContentView(Widget):

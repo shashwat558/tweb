@@ -275,16 +275,14 @@ class TWebApp(App):
         return widgets
 
     def _build_form_widget(self, form: Form) -> FormContainer:
-        form_container = FormContainer(form, classes="form-container")
         self._form_data[form.form_id] = dict(form.hidden_fields)
-
-        for field in form.fields:
-            from tweb.ui.widgets import FormFieldWidget
-            form_container.mount(FormFieldWidget(field))
-
-        submit = FormSubmitButton(form.form_id, form.submit_text)
-        form_container.mount(submit)
-        return form_container
+        return FormContainer(
+            form,
+            fields=form.fields,
+            submit_id=form.form_id,
+            submit_text=form.submit_text,
+            classes="form-container",
+        )
 
     def _render_form(self, result: Text, form: Form, w: int) -> None:
         inner_w = w - 4
